@@ -1,8 +1,11 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# AshyAFP v3
 # Copyright 2018 Paul Ashton
 # Sponsored by Rusty Brown's Ring Donuts
+
+# v4
+# - Tidy up
+# - Add test afp file and example usage
 
 # v3
 # - Added support for text overlays - these are now automagically added to
@@ -74,7 +77,8 @@ SF_BPG = 0xd3a8af
 SF_EPG = 0xd3a9af
 SF_BAG = 0xd3a8c9
 SF_EAG = 0xd3a9c9
-SF_MCF = 0xd3ab8a
+SF_MCF1 = 0xd3b18a # format 1
+SF_MCF = 0xd3ab8a # format 2
 SF_MPS = 0xd3b15f
 SF_PGD = 0xd3a6af
 SF_PTD = 0xd3b19b
@@ -177,6 +181,7 @@ afp_fields = {
     SF_IPS: "Include Page Segment",
     SF_IRD: "IM Image Raster Data",
     SF_MCC: "Medium Copy Count",
+    SF_MCF1: "Map Coded Font - Format 1",
     SF_MCF: "Map Coded Font - Format 2",
     SF_MDD: "Medium Description",
     SF_MGO: "Map Graphics Object",
@@ -218,6 +223,7 @@ afp_functions = {
     "RPS": (0xee, 0xef),
     "SCFL": (0xf0, 0xf1),
     "SEC": (0x80, 0x81),
+    "SIA": (0xc2, 0xc3),
     "STC": (0x74, 0x75),
     "STO": (0xf6, 0xf7),
     "SVI": (0xc4, 0xc5),
@@ -239,6 +245,7 @@ afp_functions_desc = {
     afp_functions["RPS"][0]: "Repeat String U",
     afp_functions["SCFL"][0]: "Set Coded Font Local U",
     afp_functions["SEC"][0]: "Set Extended Text Color U",
+    afp_functions["SIA"][0]: "Set Intercharacter Adjustment U",
     afp_functions["STC"][0]: "Set Text Color U",
     afp_functions["STO"][0]: "Set Text Orientation U",
     afp_functions["SVI"][0]: "Set Variable Space Character Increment U",
@@ -256,6 +263,7 @@ afp_functions_desc = {
     afp_functions["RPS"][1]: "Repeat String C",
     afp_functions["SCFL"][1]: "Set Coded Font Local C",
     afp_functions["SEC"][1]: "Set Extended Text Color C",
+    afp_functions["SIA"][1]: "Set Intercharacter Adjustment C",
     afp_functions["STC"][1]: "Set Text Color C",
     afp_functions["STO"][1]: "Set Text Orientation C",
     afp_functions["SVI"][1]: "Set Variable Space Character Increment C",
@@ -599,8 +607,6 @@ class AshyAFP(object):
             rawpages = self._getFieldsBetween(SF_BPG, SF_EPG, data=doc)
             pages = [self.parsePage(i) for i in rawpages]
 
-            #data = {"tle": tles, "pages": pages}#, "raw_pages": rawpages}
-            #self.documents.append(data)
             self.documents.append(Document(pages=pages, tle=tles))
 
         return len(self.documents)
@@ -742,7 +748,7 @@ class AshyAFP(object):
                 r_fra = function_data[4] # fraction (bit 0 denotes 1/2 measurement unit, bit 1 denotes 1/4 measurement unit etc..)
                 PTOCA.append((ami, amb, color, -1, ("I-Rule", r_len, r_wid, r_fra)))
 
-            elif function in afp_functions["NOP"] + afp_functions["SCFL"]:
+            elif function in afp_functions["NOP"] + afp_functions["SCFL"] + afp_functions["SIA"] + afp_functions["SVI"]:
                 # Ignore these functions
                 pass
 
@@ -859,4 +865,28 @@ class AshyAFP(object):
 if __name__ == "__main__":
     a = AshyAFP(r"test.afp")
     a.printStats()
+    page = a.parsePage(a.pages[0])
+
+    # Find text pos..
+    pos = page.findTextPos("README")
+    print(f"\nThe text 'README' was found at position {pos}.")
+
+    # Find text element..
+    elem = page.findText("README")[0]
+    print(f"The text element for 'README' looks like {elem}")
+
+    # Get area text..
+    area = (0, 4583, 10000, 5300)
+    text = page.getText(area=area, delimiter="")
+    print(f"The area {area}, contains this text: {text}")
+
+    # Find text with color..
+    text = page.findText("", color=0x197f33)
+    print(f"Find texts with color 0x197f33: {text}")
+
+    # List resources..
+    res = a.resources.keys()
+    print(f"List of resources: {tuple(res)}")
+
+    print("\nFinished!")
     assert 0

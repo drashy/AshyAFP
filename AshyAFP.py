@@ -3,10 +3,16 @@
 # Copyright 2018 Paul Ashton
 # Sponsored by Rusty Brown's Ring Donuts
 
+# v5
+# - Added area support to findText and findTextPos
+# - Add field SF_MCF1
+# - Add function SIA
+# - Fix color filter on GetText
+#
 # v4
 # - Tidy up
 # - Add test afp file and example usage
-
+#
 # v3
 # - Added support for text overlays - these are now automagically added to
 #   page text-element list so will just show up as regular text elements.
@@ -346,22 +352,26 @@ class Page(object):
         if not self.elements:
             return ""
 
-        if sort:
-            items = sorted(self.elements, key=lambda x: (x[1], x[0]))
-        else:
-            items = self.elements
-
+        # Get elements..
         if area != None:
-            items = (i[4] for i in items if i[3] != -1 and i[0] >= area[0] and i[0] <= area[2] and i[1] >= area[1] and i[1] <= area[3])
+            items = (i for i in self.elements if i[3] != -1 and i[0] >= area[0] and i[0] <= area[2] and i[1] >= area[1] and i[1] <= area[3])
         else:
-            items = (i[4] for i in items if i[3] != -1)
+            items = (i for i in self.elements if i[3] != -1)
+
+        # Sort items if needed..
+        if sort:
+            items = sorted(items, key=lambda x: (x[1], x[0]))
+
+        # Filter by color..
+        if color != None:
+            items = (i for i in items if i[2]==color)
+
+        # Get just the texts..
+        items = (i[4] for i in items)
 
         # Check for strippable items (remove them if empty)..
         if strip:
             items = (i.strip() for i in tuple(items) if i.strip())
-
-        if color != None:
-            items = (i for i in items if i[2]==color)
 
         return delimiter.join(items)
 
@@ -419,16 +429,16 @@ class Page(object):
 
         return tuple(items)
 
-    def findTextPos(self, text, rx=True, exactMatch=False, color=None):
+    def findTextPos(self, text, rx=True, exactMatch=False, color=None, area=None):
         """
         Return the position of the first match
         """
-        results = self.findText(text, rx=rx, exactMatch=exactMatch, color=color)
+        results = self.findText(text, rx=rx, exactMatch=exactMatch, color=color, area=area)
         if results:
             return results[0][0:2]
         return None
 
-    def findText(self, text, rx=True, exactMatch=False, color=None):
+    def findText(self, text, rx=True, exactMatch=False, color=None, area=None):
         """
         Return the element containing given text
         If color is specified then only text with that color will be returned.
@@ -447,6 +457,11 @@ class Page(object):
                 if (exactMatch and i[4] == text) or (not exactMatch and text in i[4]):
                     items.append(i)
 
+        # Filter by area..
+        if area != None:
+            items = (i for i in items if (area[0] != None and i[0] >= area[0]) and (area[2] != None and i[0] <= area[2]) and (area[1] != None and i[1] >= area[1]) and (area[3] != None and i[1] <= area[3]))
+
+        # Filter by color..
         if color != None:
             items = (i for i in items if i[2]==color)
 
@@ -581,7 +596,7 @@ class AshyAFP(object):
                     key = self.toASCII(data[2:2+tle_length])
 
                 elif tle_code == 0x36: # Attribute Value
-                    value = codecs.decode(data[2:2+tle_length], "EBCDIC-CP-BE")
+                    value = self.toASCII(data[2:2+tle_length])
 
                 # Add to dict..
                 if key and value:
@@ -718,7 +733,7 @@ class AshyAFP(object):
             elif function in afp_functions["TRN"]:
                 # Transparent Data
                 # Decode this data from EBCDIC to ASCII
-                text = codecs.decode(function_data, "EBCDIC-CP-BE")
+                text = self.toASCII(function_data)
                 text = re.sub(r"\x16|\x91", r"'", text) # Fix quotes
 
                 # Add to PTOCA list..

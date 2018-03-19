@@ -3,6 +3,11 @@
 # Copyright 2018 Paul Ashton
 # Sponsored by Rusty Brown's Ring Donuts
 
+# v6
+# - Rework ptocadat parser
+# - Add MergeElements method
+# - Add merge support to getText, findText and getTextElements
+#
 # v5
 # - Added area support to findText and findTextPos
 # - Add field SF_MCF1
@@ -336,7 +341,41 @@ class Page(object):
     def __init__(self, elements=None):
         self.elements = tuple(elements) if elements != None else None
 
-    def getText(self, area=None, delimiter="\n", sort=True, strip=True, color=None):
+    def mergeElements(self, elements, delimiter=" "):
+        """
+        Merge all elements that are on the same Y coord.
+        Returns new list of merged elements.
+        ie.
+            (416, 3791, 0, 0, 'For'), (526, 3791, 0, 0, 'example')
+        will become:
+            (416, 3791, 0, 0, 'For example')
+        """
+        elements = tuple(elements) # Ensure we're working with a tuple
+
+        newElements = []
+
+        # Get all Y positions in order..
+        ypositions = sorted(set([i[1] for i in elements]))
+
+        for ypos in ypositions:
+            # Get all elements on this line..
+            lineElements = [i for i in elements if i[1]==ypos]
+
+            # Ensure they're in the correct order
+            lineElements = sorted(lineElements, key=lambda _: _[0])
+
+            # Add to newElements list..
+            if len(lineElements) == 1:
+                # Only one element on this line..
+                newElements.append(lineElements[0])
+            else:
+                # Multiple elements need to be joined..
+                newText = delimiter.join([i[4] for i in lineElements if i[4].strip()])
+                newElements.append(lineElements[0][:4] + (newText,)) # Use the original x, y, c, o data along with new text
+
+        return newElements
+
+    def getText(self, area=None, delimiter="\n", sort=True, strip=True, color=None, mergeInlineElements=False):
         """
         Return all text on page or in given area
         Separated by delimiter
@@ -358,6 +397,9 @@ class Page(object):
         else:
             items = (i for i in self.elements if i[3] != -1)
 
+        if not items:
+            return ()
+
         # Sort items if needed..
         if sort:
             items = sorted(items, key=lambda x: (x[1], x[0]))
@@ -366,16 +408,18 @@ class Page(object):
         if color != None:
             items = (i for i in items if i[2]==color)
 
-        # Get just the texts..
-        items = (i[4] for i in items)
-
-        # Check for strippable items (remove them if empty)..
+        # Filter empty (whitespace only) elements..
         if strip:
-            items = (i.strip() for i in tuple(items) if i.strip())
+            items = ((x, y, c, o, t.strip()) for x, y, c, o, t in tuple(items) if t.strip())
 
-        return delimiter.join(items)
+        # Merge texts?
+        if mergeInlineElements:
+            items = self.mergeElements(items)
 
-    def getTextElements(self, area=None, sort=True, color=None):
+        # Join the texts and return..
+        return delimiter.join((i[4] for i in items))
+
+    def getTextElements(self, area=None, sort=True, color=None, mergeInlineElements=False):
         """
         Return all text elements on page or in given area
 
@@ -395,6 +439,9 @@ class Page(object):
         else:
             items = self.elements
 
+        if not items:
+            return ()
+
         if area != None:
             items = (i for i in items if i[3] != -1 and i[0] >= area[0] and i[0] <= area[2] and i[1] >= area[1] and i[1] <= area[3])
         else:
@@ -402,6 +449,10 @@ class Page(object):
 
         if color != None:
             items = (i for i in items if i[2]==color)
+
+        # Merge texts?
+        if mergeInlineElements:
+            items = self.mergeElements(items)
 
         return tuple(items)
 
@@ -438,7 +489,7 @@ class Page(object):
             return results[0][0:2]
         return None
 
-    def findText(self, text, rx=True, exactMatch=False, color=None, area=None):
+    def findText(self, text, rx=True, exactMatch=False, color=None, area=None, mergeInlineElements=False):
         """
         Return the element containing given text
         If color is specified then only text with that color will be returned.
@@ -457,6 +508,9 @@ class Page(object):
                 if (exactMatch and i[4] == text) or (not exactMatch and text in i[4]):
                     items.append(i)
 
+        if not items:
+            return ()
+
         # Filter by area..
         if area != None:
             items = (i for i in items if (area[0] != None and i[0] >= area[0]) and (area[2] != None and i[0] <= area[2]) and (area[1] != None and i[1] >= area[1]) and (area[3] != None and i[1] <= area[3]))
@@ -464,6 +518,10 @@ class Page(object):
         # Filter by color..
         if color != None:
             items = (i for i in items if i[2]==color)
+
+        # Merge texts?
+        if mergeInlineElements:
+            items = self.mergeElements(items)
 
         return tuple(items)
 
@@ -687,18 +745,14 @@ class AshyAFP(object):
                 assert esc_seq == 0x2bd3, f"Escape sequence not correct! ({hex(esc_seq)} should be 0x2bd3)"
                 offset += 2
 
-            # Get length..
-            length = data[offset:offset+1][0]
-            offset += 1
-
-            # Get function..
-            function = data[offset:offset+1][0]
-            offset += 1
+            # Get length, function and data..
+            length = data[offset] # This is full length of record
+            assert length, "no length function?!"
+            function = data[offset+1]
             assert function in afp_functions_desc, f"Function {hex(function)} not defined"
-
-            # Get function data..
-            function_data = data[offset:offset+(length-2)]
-            offset += length-2
+            function_data = data[offset+2:offset+length]
+            # move offset..
+            offset += length
 
             # Handle functions..
             if function in afp_functions["STO"]:
